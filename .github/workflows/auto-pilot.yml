@@ -1,11 +1,9 @@
 name: 24/7 Species Auto-Pilot
 
 on:
-  schedule:
-    # Runs every 6 hours
-    - cron: '0 */6 * * *'
-  # Allows manual trigger from GitHub UI
   workflow_dispatch:
+  schedule:
+    - cron: '0 */1 * * *' # Runs automatically every hour
 
 jobs:
   run-autopilot:
