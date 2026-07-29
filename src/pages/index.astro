@@ -1,0 +1,47 @@
+---
+import { supabase } from '../lib/supabase';
+
+// Fetch species data from your Supabase table
+const { data: species, error } = await supabase
+  .from('species')
+  .select('*');
+---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Species Database</title>
+</head>
+<body style="font-family: system-ui, sans-serif; padding: 2rem; max-width: 800px; margin: 0 auto; line-height: 1.5;">
+  <h1>Species Scientific Database</h1>
+
+  {error && (
+    <p style="color: red; background: #fee2e2; padding: 1rem; border-radius: 8px;">
+      <strong>Error:</strong> {error.message}
+    </p>
+  )}
+
+  {species && species.length === 0 && (
+    <p style="color: green; font-weight: bold; background: #dcfce7; padding: 1rem; border-radius: 8px;">
+       Connected to Supabase! No species added yet.
+    </p>
+  )}
+
+{species && species.length > 0 && (
+    <ul style="list-style: none; padding: 0;">
+      {species.map((item) => (
+        <li style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem; margin-bottom: 0.75rem;">
+          <a href={`/species/${item.id}`} style="font-size: 1.1rem; font-weight: bold; color: #2563eb; text-decoration: none;">
+            {item.common_name}
+          </a>
+          <span style="font-style: italic; color: #4b5563; margin-left: 0.5rem;">
+            ({item.scientific_name})
+          </span>
+        </li>
+      ))}
+    </ul>
+  )}
+</body>
+</html>
