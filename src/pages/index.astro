@@ -1,47 +1,477 @@
 ---
-import { supabase } from '../lib/supabase';
+import { createClient } from '@supabase/supabase-js';
 
-// Fetch species data from your Supabase table
-const { data: species, error } = await supabase
-  .from('species')
-  .select('*');
+const supabase = createClient(
+  import.meta.env.PUBLIC_SUPABASE_URL,
+  import.meta.env.PUBLIC_SUPABASE_ANON_KEY
+);
+
+const url = new URL(Astro.request.url);
+const searchQuery = url.searchParams.get('q') || '';
+
+let speciesList = null;
+let randomSpecies = null;
+
+if (searchQuery) {
+  const { data, error } = await supabase
+    .from('species')
+    .select('common_name, scientific_name, conservation_status, image_url, description')
+    .or(`common_name.ilike.%${searchQuery}%,scientific_name.ilike.%${searchQuery}%`)
+    .order('common_name', { ascending: true });
+
+  if (!error) {
+    speciesList = data;
+  }
+} else {
+  const { data, error } = await supabase
+    .from('species')
+    .select('common_name, scientific_name, conservation_status, image_url, description');
+
+  if (!error && data && data.length > 0) {
+    const randomIndex = Math.floor(Math.random() * data.length);
+    randomSpecies = data[randomIndex];
+  }
+}
 ---
 
-<!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Species Database</title>
-</head>
-<body style="font-family: system-ui, sans-serif; padding: 2rem; max-width: 800px; margin: 0 auto; line-height: 1.5;">
-  <h1>Species Scientific Database</h1>
+  <head>
+    <meta charset="utf-8" />
+    <title>Wildlife & Research Database</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Newsreader:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        background-color: #0b0f0e;
+        color: #f1f5f9;
+        font-family: 'Inter', sans-serif;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        min-height: 100vh;
+      }
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
 
-  {error && (
-    <p style="color: red; background: #fee2e2; padding: 1rem; border-radius: 8px;">
-      <strong>Error:</strong> {error.message}
-    </p>
-  )}
+      /* Navbar */
+      .navbar {
+        width: 100%;
+        border-bottom: 1px solid #1e293b;
+        background-color: #0d1311;
+        padding: 1rem 2rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .navbar-brand {
+        font-weight: 600;
+        color: #e2e8f0;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 0.95rem;
+      }
+      .brand-dot {
+        width: 10px;
+        height: 10px;
+        background-color: #10b981;
+        border-radius: 50%;
+      }
+      .badge {
+        font-size: 0.75rem;
+        color: #94a3b8;
+        background: #1e293b;
+        padding: 4px 10px;
+        border-radius: 4px;
+        border: 1px solid #334155;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
 
-  {species && species.length === 0 && (
-    <p style="color: green; font-weight: bold; background: #dcfce7; padding: 1rem; border-radius: 8px;">
-       Connected to Supabase! No species added yet.
-    </p>
-  )}
+      /* Main Centered Container */
+      .main-wrapper {
+        max-width: 850px;
+        width: 100%;
+        margin: 0 auto;
+        padding: 50px 20px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        flex-grow: 1;
+      }
 
-{species && species.length > 0 && (
-    <ul style="list-style: none; padding: 0;">
-      {species.map((item) => (
-        <li style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem; margin-bottom: 0.75rem;">
-          <a href={`/species/${item.id}`} style="font-size: 1.1rem; font-weight: bold; color: #2563eb; text-decoration: none;">
-            {item.common_name}
-          </a>
-          <span style="font-style: italic; color: #4b5563; margin-left: 0.5rem;">
-            ({item.scientific_name})
-          </span>
-        </li>
-      ))}
-    </ul>
-  )}
-</body>
+      /* Hero Section */
+      .hero-section {
+        margin-bottom: 40px;
+        width: 100%;
+      }
+      h1 {
+        font-family: 'Newsreader', Georgia, serif;
+        font-size: 3rem;
+        font-weight: 600;
+        margin: 0 0 12px 0;
+        color: #ffffff;
+        letter-spacing: -0.02em;
+      }
+      .hero-subtitle {
+        color: #94a3b8;
+        font-size: 1.05rem;
+        font-weight: 300;
+        line-height: 1.5;
+        max-width: 600px;
+        margin: 0 auto;
+      }
+
+      /* Search Form */
+      .search-form {
+        width: 100%;
+        max-width: 650px;
+        display: flex;
+        gap: 10px;
+        background: #121a17;
+        padding: 8px;
+        border-radius: 16px;
+        border: 1px solid #1e293b;
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.4);
+        margin-bottom: 50px;
+      }
+      .search-input {
+        flex-grow: 1;
+        background: transparent;
+        border: none;
+        color: #f1f5f9;
+        padding: 12px 16px;
+        font-size: 0.95rem;
+        outline: none;
+      }
+      .search-input::placeholder {
+        color: #64748b;
+      }
+      .search-btn {
+        background-color: #059669;
+        color: white;
+        border: none;
+        padding: 12px 24px;
+        border-radius: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        font-size: 0.9rem;
+        transition: background 0.2s;
+      }
+      .search-btn:hover {
+        background-color: #047857;
+      }
+      .reset-btn {
+        background-color: #1e293b;
+        color: #cbd5e1;
+        border: 1px solid #334155;
+        padding: 12px 18px;
+        border-radius: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        font-size: 0.9rem;
+        display: flex;
+        align-items: center;
+      }
+      .reset-btn:hover {
+        background-color: #334155;
+      }
+
+      /* Content Area */
+      .content-container {
+        width: 100%;
+      }
+      .section-tag {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        margin-bottom: 24px;
+        font-size: 0.75rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: #34d399;
+      }
+      .pulse-dot {
+        width: 8px;
+        height: 8px;
+        background-color: #10b981;
+        border-radius: 50%;
+      }
+
+      /* Featured Discovery Card */
+      .featured-card {
+        background: #121a17;
+        border: 1px solid #1e293b;
+        border-radius: 20px;
+        overflow: hidden;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        text-align: left;
+        max-width: 780px;
+        margin: 0 auto;
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        transition: border-color 0.3s;
+      }
+      .featured-card:hover {
+        border-color: rgba(16, 185, 129, 0.4);
+      }
+      .featured-img-wrap {
+        width: 100%;
+        height: 100%;
+        min-height: 320px;
+        background: #090d0c;
+      }
+      .featured-img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+      .featured-content {
+        padding: 35px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+      }
+      .card-title {
+        font-family: 'Newsreader', Georgia, serif;
+        font-size: 1.85rem;
+        font-weight: 600;
+        margin: 0 0 4px 0;
+        color: #ffffff;
+      }
+      .card-sci-name {
+        font-family: 'Newsreader', Georgia, serif;
+        font-style: italic;
+        color: #94a3b8;
+        font-size: 1.05rem;
+        margin: 0 0 16px 0;
+      }
+      .status-badge {
+        display: inline-block;
+        background: rgba(6, 78, 59, 0.6);
+        color: #34d399;
+        border: 1px solid rgba(52, 211, 153, 0.3);
+        font-size: 0.75rem;
+        font-weight: 500;
+        padding: 4px 10px;
+        border-radius: 6px;
+        width: max-content;
+        margin-bottom: 16px;
+      }
+      .card-desc {
+        color: #cbd5e1;
+        font-size: 0.9rem;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        margin: 0 0 20px 0;
+        font-weight: 300;
+        line-height: 1.6;
+      }
+      .card-link {
+        color: #34d399;
+        font-weight: 500;
+        font-size: 0.9rem;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .card-link:hover {
+        text-decoration: underline;
+      }
+
+      /* Search Results Grid */
+      .results-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+        gap: 24px;
+        text-align: left;
+      }
+      .result-card {
+        background: #121a17;
+        border: 1px solid #1e293b;
+        border-radius: 16px;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        transition: border-color 0.3s;
+      }
+      .result-card:hover {
+        border-color: rgba(16, 185, 129, 0.4);
+      }
+      .result-img {
+        width: 100%;
+        height: 220px;
+        object-fit: cover;
+      }
+      .result-body {
+        padding: 24px;
+        display: flex;
+        flex-direction: column;
+        flex-grow: 1;
+      }
+
+      /* Footer */
+      footer {
+        width: 100%;
+        border-top: 1px solid #1e293b;
+        background-color: #0d1311;
+        padding: 30px 20px;
+        text-align: center;
+        color: #64748b;
+        font-size: 0.8rem;
+      }
+      .footer-content {
+        max-width: 850px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        align-items: center;
+      }
+      .footer-quote {
+        font-family: 'Newsreader', Georgia, serif;
+        font-style: italic;
+        color: #94a3b8;
+        font-size: 0.95rem;
+      }
+
+      @media (max-width: 768px) {
+        .featured-card {
+          grid-template-columns: 1fr;
+        }
+        .featured-img-wrap {
+          min-height: 240px;
+        }
+        h1 {
+          font-size: 2.25rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    
+    <header class="navbar">
+      <a href="/" class="navbar-brand">
+        <span class="brand-dot"></span>
+        Wildlife & Research Database
+      </a>
+      <span class="badge">Repository v1.0</span>
+    </header>
+
+    <div class="main-wrapper">
+      
+      <div class="hero-section">
+        <h1>Global Biodiversity Archive</h1>
+        <p class="hero-subtitle">
+          Explore indexed species profiles and their connected peer-reviewed literature in a centralized repository format.
+        </p>
+      </div>
+
+      <form method="GET" class="search-form">
+        <input 
+          type="text" 
+          name="q" 
+          value={searchQuery} 
+          placeholder="Search by common name (e.g., Wolf) or scientific name..." 
+          class="search-input"
+        />
+        <button type="submit" class="search-btn">Search</button>
+        {searchQuery && (
+          <a href="/" class="reset-btn">Reset</a>
+        )}
+      </form>
+
+      <div class="content-container">
+        {searchQuery ? (
+          <div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 12px; border-bottom: 1px solid #1e293b;">
+              <h2 style="font-size: 1.1rem; font-weight: 500; color: #cbd5e1; margin: 0;">
+                Search Results for <span style="color: #34d399; font-weight: 600;">"{searchQuery}"</span>
+              </h2>
+              <span style="font-size: 0.8rem; color: #64748b;">{speciesList ? speciesList.length : 0} records found</span>
+            </div>
+
+            {speciesList && speciesList.length > 0 ? (
+              <div class="results-grid">
+                {speciesList.map((species) => (
+                  <a href={`/species/${encodeURIComponent(species.scientific_name)}`} class="result-card">
+                    {species.image_url && (
+                      <img src={species.image_url} alt={species.common_name} class="result-img" />
+                    )}
+                    <div class="result-body">
+                      <h3 style="font-family: 'Newsreader', Georgia, serif; font-size: 1.25rem; font-weight: 600; color: #fff; margin: 0 0 4px 0;">
+                        {species.common_name}
+                      </h3>
+                      <p style="font-family: 'Newsreader', Georgia, serif; font-style: italic; color: #94a3b8; font-size: 0.9rem; margin: 0 0 12px 0;">
+                        {species.scientific_name}
+                      </p>
+                      <span class="status-badge" style="margin-bottom: 12px;">{species.conservation_status}</span>
+                      <p class="card-desc" style="margin-top: auto; margin-bottom: 0;">{species.description}</p>
+                    </div>
+                  </a>
+                ))}
+              </div>
+            ) : (
+              <div style="padding: 60px 20px; background: #121a17; border: 1px solid #1e293b; border-radius: 16px;">
+                <p style="font-family: 'Newsreader', Georgia, serif; font-style: italic; color: #94a3b8; font-size: 1.1rem; margin: 0 0 12px 0;">
+                  No matching records found in the archive.
+                </p>
+                <a href="/" style="color: #34d399; font-weight: 500; font-size: 0.9rem;">Return to main repository</a>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div>
+            <div class="section-tag">
+              <span class="pulse-dot"></span>
+              Featured Discovery Record
+            </div>
+
+            {randomSpecies ? (
+              <a href={`/species/${encodeURIComponent(randomSpecies.scientific_name)}`} class="featured-card">
+                {randomSpecies.image_url ? (
+                  <div class="featured-img-wrap">
+                    <img src={randomSpecies.image_url} alt={randomSpecies.common_name} class="featured-img" />
+                  </div>
+                ) : (
+                  <div></div>
+                )}
+                <div class="featured-content">
+                  <h2 class="card-title">{randomSpecies.common_name}</h2>
+                  <p class="card-sci-name">{randomSpecies.scientific_name}</p>
+                  <span class="status-badge">{randomSpecies.conservation_status}</span>
+                  <p class="card-desc">{randomSpecies.description}</p>
+                  <span class="card-link">
+                    Access full record &amp; papers &rarr;
+                  </span>
+                </div>
+              </a>
+            ) : (
+              <p style="color: #94a3b8; font-style: italic;">No records available in repository.</p>
+            )}
+          </div>
+        )}
+      </div>
+
+    </div>
+
+    <footer>
+      <div class="footer-content">
+        <p class="footer-quote">Archiving global biodiversity and peer-reviewed literature.</p>
+        <p>&copy; {new Date().getFullYear()} Wildlife &amp; Research Database. All rights reserved.</p>
+      </div>
+    </footer>
+
+  </body>
 </html>

@@ -1,0 +1,387 @@
+---
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  import.meta.env.PUBLIC_SUPABASE_URL,
+  import.meta.env.PUBLIC_SUPABASE_ANON_KEY
+);
+
+const { scientific_name, slug } = Astro.params;
+const targetName = scientific_name || slug;
+const decodedName = decodeURIComponent(targetName || '').trim();
+
+// 1. Safely fetch species by scientific name (with fallback search)
+let { data: species, error } = await supabase
+  .from('species')
+  .select('*')
+  .ilike('scientific_name', decodedName)
+  .maybeSingle();
+
+if (!species) {
+  const { data: fallbackData } = await supabase
+    .from('species')
+    .select('*')
+    .ilike('common_name', decodedName)
+    .maybeSingle();
+  species = fallbackData;
+}
+
+if (!species) {
+  return Astro.redirect('/404');
+}
+
+// 2. Safely fetch literature without crashing the page if unavailable
+let literatureList = [];
+try {
+  const { data: litData } = await supabase
+    .from('literature')
+    .select('*')
+    .eq('species_id', species.id);
+  
+  if (litData) {
+    literatureList = litData;
+  }
+} catch (e) {
+  // Gracefully handle if literature table/relation varies
+}
+
+// Helper to style IUCN status badges dynamically
+function getStatusStyle(status: string) {
+  const s = (status || '').toLowerCase();
+  if (s.includes('critically endangered') || s.includes('endangered')) {
+    return { bg: 'rgba(127, 29, 29, 0.6)', color: '#f87171', border: 'rgba(248, 113, 113, 0.3)' };
+  } else if (s.includes('vulnerable') || s.includes('near threatened')) {
+    return { bg: 'rgba(120, 53, 15, 0.6)', color: '#fbbf24', border: 'rgba(251, 191, 36, 0.3)' };
+  } else {
+    return { bg: 'rgba(6, 78, 59, 0.6)', color: '#34d399', border: 'rgba(52, 211, 153, 0.3)' };
+  }
+}
+
+const statusStyle = getStatusStyle(species.conservation_status);
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>{species.common_name} — Wildlife & Research Database</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Newsreader:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        background-color: #0b0f0e;
+        color: #f1f5f9;
+        font-family: 'Inter', sans-serif;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        min-height: 100vh;
+      }
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      /* Navbar */
+      .navbar {
+        width: 100%;
+        border-bottom: 1px solid #1e293b;
+        background-color: #0d1311;
+        padding: 1rem 2rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .navbar-brand {
+        font-weight: 600;
+        color: #e2e8f0;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 0.95rem;
+      }
+      .brand-dot {
+        width: 10px;
+        height: 10px;
+        background-color: #10b981;
+        border-radius: 50%;
+      }
+      .back-link {
+        font-size: 0.85rem;
+        color: #94a3b8;
+        background: #1e293b;
+        padding: 6px 14px;
+        border-radius: 8px;
+        border: 1px solid #334155;
+        transition: background 0.2s, color 0.2s;
+      }
+      .back-link:hover {
+        background: #334155;
+        color: #fff;
+      }
+
+      /* Main Centered Container */
+      .main-wrapper {
+        max-width: 850px;
+        width: 100%;
+        margin: 0 auto;
+        padding: 50px 20px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        flex-grow: 1;
+      }
+
+      /* Profile Header */
+      .profile-header {
+        width: 100%;
+        text-align: center;
+        margin-bottom: 35px;
+      }
+      h1 {
+        font-family: 'Newsreader', Georgia, serif;
+        font-size: 3rem;
+        font-weight: 600;
+        margin: 0 0 6px 0;
+        color: #ffffff;
+        letter-spacing: -0.02em;
+      }
+      .sci-name {
+        font-family: 'Newsreader', Georgia, serif;
+        font-style: italic;
+        color: #94a3b8;
+        font-size: 1.25rem;
+        margin: 0 0 16px 0;
+      }
+      .status-badge {
+        display: inline-block;
+        background: {statusStyle.bg};
+        color: {statusStyle.color};
+        border: 1px solid {statusStyle.border};
+        font-size: 0.8rem;
+        font-weight: 500;
+        padding: 6px 14px;
+        border-radius: 8px;
+      }
+
+      /* Image Showcase */
+      .image-container {
+        width: 100%;
+        max-width: 780px;
+        border-radius: 20px;
+        overflow: hidden;
+        border: 1px solid #1e293b;
+        background: #121a17;
+        margin-bottom: 45px;
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+      }
+      .profile-img {
+        width: 100%;
+        max-height: 480px;
+        object-fit: cover;
+        display: block;
+      }
+
+      /* Content Sections */
+      .content-section {
+        width: 100%;
+        max-width: 780px;
+        background: #121a17;
+        border: 1px solid #1e293b;
+        border-radius: 20px;
+        padding: 40px;
+        margin-bottom: 30px;
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+        text-align: left;
+      }
+      .section-heading {
+        font-family: 'Newsreader', Georgia, serif;
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: #ffffff;
+        margin: 0 0 16px 0;
+        padding-bottom: 12px;
+        border-bottom: 1px solid #1e293b;
+      }
+      .section-body {
+        color: #cbd5e1;
+        font-size: 1rem;
+        font-weight: 300;
+        line-height: 1.7;
+        margin: 0;
+      }
+
+      /* Literature Cards */
+      .lit-card {
+        background: #0d1311;
+        border: 1px solid #1e293b;
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 16px;
+        transition: border-color 0.2s;
+      }
+      .lit-card:hover {
+        border-color: rgba(52, 211, 153, 0.4);
+      }
+      .lit-title {
+        font-weight: 600;
+        color: #f1f5f9;
+        font-size: 1.05rem;
+        margin: 0 0 6px 0;
+      }
+      .lit-meta {
+        font-size: 0.85rem;
+        color: #94a3b8;
+        margin-bottom: 12px;
+      }
+      .lit-link {
+        color: #34d399;
+        font-size: 0.85rem;
+        font-weight: 500;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .lit-link:hover {
+        text-decoration: underline;
+      }
+
+      /* Details Grid */
+      .details-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+        width: 100%;
+        max-width: 780px;
+        margin-bottom: 30px;
+      }
+      .detail-card {
+        background: #121a17;
+        border: 1px solid #1e293b;
+        border-radius: 16px;
+        padding: 24px;
+        text-align: left;
+      }
+      .detail-label {
+        font-size: 0.75rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: #34d399;
+        margin-bottom: 8px;
+      }
+      .detail-value {
+        font-size: 1rem;
+        color: #e2e8f0;
+        margin: 0;
+        font-weight: 400;
+      }
+
+      /* Footer */
+      footer {
+        width: 100%;
+        border-top: 1px solid #1e293b;
+        background-color: #0d1311;
+        padding: 30px 20px;
+        text-align: center;
+        color: #64748b;
+        font-size: 0.8rem;
+      }
+      .footer-content {
+        max-width: 850px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        align-items: center;
+      }
+      .footer-quote {
+        font-family: 'Newsreader', Georgia, serif;
+        font-style: italic;
+        color: #94a3b8;
+        font-size: 0.95rem;
+      }
+
+      @media (max-width: 768px) {
+        .details-grid {
+          grid-template-columns: 1fr;
+        }
+        h1 {
+          font-size: 2.25rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    
+    <header class="navbar">
+      <a href="/" class="navbar-brand">
+        <span class="brand-dot"></span>
+        Wildlife & Research Database
+      </a>
+      <a href="/" class="back-link">&larr; Back to repository</a>
+    </header>
+
+    <div class="main-wrapper">
+      
+      <div class="profile-header">
+        <h1>{species.common_name}</h1>
+        <p class="sci-name">{species.scientific_name}</p>
+        <span class="status-badge">{species.conservation_status}</span>
+      </div>
+
+      {species.image_url && (
+        <div class="image-container">
+          <img src={species.image_url} alt={species.common_name} class="profile-img" />
+        </div>
+      )}
+
+      <div class="content-section">
+        <h2 class="section-heading">Habitat &amp; Overview</h2>
+        <p class="section-body">{species.description}</p>
+      </div>
+
+      {literatureList.length > 0 && (
+        <div class="content-section">
+          <h2 class="section-heading">Indexed Literature</h2>
+          <div>
+            {literatureList.map((paper: any) => (
+              <div class="lit-card">
+                <h3 class="lit-title">{paper.title}</h3>
+                <p class="lit-meta">{paper.journal} {paper.year ? `(${paper.year})` : ''}</p>
+                {paper.url && (
+                  <a href={paper.url} target="_blank" rel="noopener noreferrer" class="lit-link">
+                    View publication &rarr;
+                  </a>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div class="details-grid">
+        <div class="detail-card">
+          <div class="detail-label">Conservation Status</div>
+          <p class="detail-value">{species.conservation_status}</p>
+        </div>
+        <div class="detail-card">
+          <div class="detail-label">Taxonomic Family</div>
+          <p class="detail-value">{species.family || 'Unassigned'}</p>
+        </div>
+      </div>
+
+    </div>
+
+    <footer>
+      <div class="footer-content">
+        <p class="footer-quote">Archiving global biodiversity and peer-reviewed literature.</p>
+        <p>&copy; {new Date().getFullYear()} Wildlife &amp; Research Database. All rights reserved.</p>
+      </div>
+    </footer>
+
+  </body>
+</html>

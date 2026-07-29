@@ -19,7 +19,9 @@
     "@astrojs/node": "^11.0.3",
     "@astrojs/vercel": "^11.0.4",
     "@supabase/supabase-js": "^2.111.0",
+    "@tailwindcss/vite": "^4.3.3",
     "astro": "^7.1.5",
+    "tailwindcss": "^4.3.3",
     "ws": "^8.21.1"
   },
   "devDependencies": {

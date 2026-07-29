@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 // 1. Initialize Supabase from environment variables
 const supabaseUrl = process.env.PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.PUBLIC_SUPABASE_ANON_KEY;
+const openAlexApiKey = process.env.OPENALEX_API_KEY;
 
 if (!supabaseUrl || !supabaseAnonKey) {
   console.error('❌ Error: PUBLIC_SUPABASE_URL or PUBLIC_SUPABASE_ANON_KEY missing in .env');
@@ -11,8 +12,10 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+// Helper to pause execution and respect API rate limits
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 // Helper: OpenAlex returns abstracts as an "inverted index" object.
-// This helper reconstructs the full readable text string.
 function decodeAbstract(invertedIndex) {
   if (!invertedIndex) return null;
   const words = [];
@@ -25,18 +28,28 @@ function decodeAbstract(invertedIndex) {
   return text.length > 350 ? text.slice(0, 350) + '...' : text;
 }
 
-// 2. Fetch papers for a single species
+// 2. Fetch papers for a single species with rate-limit handling
+// 2. Fetch papers for a single species with rate-limit handling
 async function fetchPapersForSpecies(species) {
   console.log(`\n🔍 Searching OpenAlex for: ${species.common_name} (${species.scientific_name})...`);
 
-  // Search OpenAlex works endpoint sorted by citation count
   const query = encodeURIComponent(`"${species.scientific_name}"`);
-  const url = `https://api.openalex.org/works?filter=title_and_abstract.search:${query}&per_page=5&sort=cited_by_count:desc`;
+  let url = `https://api.openalex.org/works?search=${query}&per_page=5&sort=cited_by_count:desc`;
+
+  if (openAlexApiKey) {
+    url += `&api_key=${openAlexApiKey}`;
+  }
 
   try {
     const response = await fetch(url, {
       headers: { 'User-Agent': 'AnimalDatabaseProject/1.0 (mailto:your-email@example.com)' }
     });
+
+    if (response.status === 429) {
+      console.warn(` ⚠️ OpenAlex rate limit hit (429). Backing off for 6 seconds...`);
+      await delay(6000);
+      return;
+    }
 
     if (!response.ok) {
       throw new Error(`OpenAlex API error: ${response.status}`);
@@ -53,20 +66,15 @@ async function fetchPapersForSpecies(species) {
     console.log(` Found ${works.length} top papers.`);
 
     for (const work of works) {
-      // Format clean DOI
       const rawDoi = work.doi || '';
       const cleanDoi = rawDoi.replace('https://doi.org/', '');
 
-      // Extract primary authors (up to 4)
       const authors = work.authorships
         ?.slice(0, 4)
         .map((a) => a.author.display_name)
         .join(', ');
 
-      // Extract publisher/journal name
       const journal = work.primary_location?.source?.display_name || 'Academic Journal';
-
-      // Extract and decode paper summary
       const summary = decodeAbstract(work.abstract_inverted_index);
 
       const paperRecord = {
@@ -80,7 +88,6 @@ async function fetchPapersForSpecies(species) {
         summary: summary,
       };
 
-      // Insert into Supabase papers table
       const { error } = await supabase.from('papers').insert([paperRecord]);
 
       if (error) {
@@ -94,7 +101,7 @@ async function fetchPapersForSpecies(species) {
   }
 }
 
-// 3. Main execution runner
+// 3. Main execution runner with polite delays between species
 async function main() {
   const { data: speciesList, error } = await supabase
     .from('species')
@@ -112,9 +119,11 @@ async function main() {
 
   for (const species of speciesList) {
     await fetchPapersForSpecies(species);
+    // Polite delay of 1.2 seconds between each animal search to prevent 429 errors
+    await delay(1200);
   }
 
-  console.log('\n Import finished! Refresh your website to view the papers.');
+  console.log('\n🎉 Paper import finished!');
 }
 
 main();
