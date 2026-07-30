@@ -1,33 +1,28 @@
 import { createClient } from '@supabase/supabase-js';
 
-// 1. Initialize Supabase
+// 1. Initialize Supabase with Admin/Service Role Key to bypass RLS and speed up writes
 const supabaseUrl = process.env.PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.PUBLIC_SUPABASE_ANON_KEY;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.PUBLIC_SUPABASE_ANON_KEY;
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('❌ Error: PUBLIC_SUPABASE_URL or PUBLIC_SUPABASE_ANON_KEY missing in .env');
+if (!supabaseUrl || !supabaseKey) {
+  console.error('❌ Error: Supabase credentials missing');
   process.exit(1);
 }
 
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const supabase = createClient(supabaseUrl, supabaseKey, {
+  auth: { persistSession: false }
+});
 
-// 2. Expanded target groups to pull massive biodiversity across land, air, and sea
 const animalKingdomGroups = [
-  // Mammals & Birds
   'Carnivora', 'Primate', 'Rodentia', 'Chiroptera', 'Cetartiodactyla', 'Perissodactyla', 'Passeriformes', 'Accipitriformes', 'Psittaciformes',
-  // Reptiles & Amphibians
   'Squamata', 'Testudines', 'Anura', 'Caudata',
-  // Fish & Marine Life
   'Actinopterygii', 'Chondrichthyes', 'Echinodermata', 'Cnidaria', 'Porifera',
-  // Insects & Arachnids
   'Coleoptera', 'Lepidoptera', 'Hymenoptera', 'Diptera', 'Odonata', 'Araneae',
-  // Molluscs & Crustaceans
   'Gastropoda', 'Bivalvia', 'Malacostraca', 'Annelida'
 ];
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Helper function to fetch real academic papers from CrossRef API
 async function fetchAndSavePapers(speciesId, scientificName) {
   try {
     const crossrefUrl = `https://api.crossref.org/works?query=${encodeURIComponent(scientificName)}&rows=3`;
@@ -49,22 +44,17 @@ async function fetchAndSavePapers(speciesId, scientificName) {
       const url = item.URL || (item.DOI ? `https://doi.org/${item.DOI}` : null);
 
       if (title && url) {
-        // Check if paper already exists to prevent duplicate spamming
-        const { data: existingPaper } = await supabase
-          .from('literature')
-          .select('id')
-          .eq('species_id', speciesId)
-          .eq('url', url)
-          .maybeSingle();
+        // Use upsert or check existing
+        const { error } = await supabase.from('publications').upsert([{
+          species_id: speciesId,
+          title: title,
+          journal: journal,
+          year: year,
+          url: url
+        }], { onConflict: 'species_id,url' });
 
-        if (!existingPaper) {
-          await supabase.from('literature').insert([{
-            species_id: speciesId,
-            title: title,
-            journal: journal,
-            year: year,
-            url: url
-          }]);
+        if (error) {
+          console.warn(`⚠️ Publication insert error:`, error.message);
         }
       }
     }
@@ -74,10 +64,10 @@ async function fetchAndSavePapers(speciesId, scientificName) {
 }
 
 async function importSpeciesForTerm(query) {
-  const perPage = 200; // Increased batch size per request
-  const maxPages = 5;  // Increased page depth to pull thousands of species
+  const perPage = 100; // Balanced batch size
+  const maxPages = 2;  // Reduced depth for a faster, cleaner initial run
 
-  console.log(`\n🔍 Deep scanning group: "${query}" for individual species and research papers...`);
+  console.log(`\n🔍 Scanning group: "${query}"...`);
 
   for (let page = 1; page <= maxPages; page++) {
     const url = `https://api.inaturalist.org/v1/taxa?q=${encodeURIComponent(query)}&rank=species&per_page=${perPage}&page=${page}`;
@@ -86,101 +76,72 @@ async function importSpeciesForTerm(query) {
       const response = await fetch(url);
       if (!response.ok) {
         if (response.status === 429) {
-          console.warn(` ⚠️ Rate limit hit. Backing off for 5 seconds...`);
+          console.warn(` ⚠️ Rate limit hit. Backing off...`);
           await delay(5000);
           continue;
         }
-        throw new Error(`iNaturalist API error: ${response.status}`);
+        break;
       }
 
       const data = await response.json();
       const results = data.results || [];
-
       if (results.length === 0) break;
-
-      let insertedCount = 0;
 
       for (const taxon of results) {
         const commonName = taxon.preferred_common_name || taxon.name;
         const scientificName = taxon.name;
-        const imageUrl = taxon.default_photo?.medium_url || taxon.default_photo?.square_url || 'https://images.unsplash.com/photo-1534567153574-2b12153a87f0?auto=format&fit=crop&w=800&q=80'; // Fallback image so it never gets skipped
+        const imageUrl = taxon.default_photo?.medium_url || taxon.default_photo?.square_url || 'https://images.unsplash.com/photo-1534567153574-2b12153a87f0?auto=format&fit=crop&w=800&q=80';
         
         const description = taxon.wikipedia_summary 
           ? taxon.wikipedia_summary 
-          : `Comprehensive ecological profile for ${commonName} (${scientificName}). Member of the ${query} taxonomic group.`;
+          : `Comprehensive ecological profile for ${commonName} (${scientificName}).`;
 
-        // Accurate IUCN conservation status mapping
         let conservationStatus = 'Not Evaluated';
-        if (taxon.conservation_status && taxon.conservation_status.status_name) {
+        if (taxon.conservation_status?.status_name) {
           conservationStatus = taxon.conservation_status.status_name;
         } else if (Array.isArray(taxon.conservation_statuses) && taxon.conservation_statuses.length > 0) {
           const iucnRecord = taxon.conservation_statuses.find(s => s.authority === 'IUCN') || taxon.conservation_statuses[0];
-          if (iucnRecord && iucnRecord.status_name) {
-            conservationStatus = iucnRecord.status_name;
-          }
+          if (iucnRecord?.status_name) conservationStatus = iucnRecord.status_name;
         } else if (taxon.extinct) {
           conservationStatus = 'Extinct';
         }
 
-        // True scientific family name extraction
         let familyName = query;
         if (taxon.ancestors && Array.isArray(taxon.ancestors)) {
           const familyObj = taxon.ancestors.find(a => a.rank === 'family');
-          if (familyObj && familyObj.name) {
-            familyName = familyObj.name;
-          }
+          if (familyObj?.name) familyName = familyObj.name;
         }
 
-        if (!commonName || !scientificName) {
-          continue;
-        }
+        if (!commonName || !scientificName) continue;
 
-        // Check if species already exists
-        const { data: existing } = await supabase
+        // Upsert species directly using scientific_name as unique key
+        const { data: savedSpecies, error: speciesError } = await supabase
           .from('species')
-          .select('id')
-          .eq('scientific_name', scientificName)
-          .maybeSingle();
-
-        let speciesId;
-
-        if (existing) {
-          speciesId = existing.id;
-        } else {
-          const speciesRecord = {
+          .upsert([{
             common_name: commonName,
             scientific_name: scientificName,
             description: description,
             conservation_status: conservationStatus,
             family: familyName,
             image_url: imageUrl
-          };
+          }], { onConflict: 'scientific_name' })
+          .select('id')
+          .single();
 
-          const { data: insertedSpecies, error } = await supabase
-            .from('species')
-            .insert([speciesRecord])
-            .select()
-            .single();
-
-          if (!error && insertedSpecies) {
-            insertedCount++;
-            speciesId = insertedSpecies.id;
-          }
+        if (speciesError) {
+          console.error(`❌ Species error for ${scientificName}:`, speciesError.message);
+          continue;
         }
 
-        // Ensure literature is fetched even if the species record already existed
-        if (speciesId) {
-          await fetchAndSavePapers(speciesId, scientificName);
-          await delay(150); // Respect CrossRef API guidelines
+        if (savedSpecies?.id) {
+          await fetchAndSavePapers(savedSpecies.id, scientificName);
+          await delay(100); 
         }
       }
 
-      console.log(` 📄 Page ${page}/${maxPages} for ${query}: Processed/Saved ${insertedCount} new species profiles with literature.`);
-      await delay(1000);
-
+      await delay(500);
     } catch (err) {
       console.error(`❌ Error fetching "${query}" on page ${page}:`, err.message);
-      await delay(3000);
     }
   }
 }
@@ -189,7 +150,7 @@ async function main() {
   for (const term of animalKingdomGroups) {
     await importSpeciesForTerm(term);
   }
-  console.log('\n🎉 Comprehensive species and academic literature sync complete!');
+  console.log('\n🎉 Sync complete and optimized!');
 }
 
 main();
