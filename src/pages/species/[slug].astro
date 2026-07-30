@@ -6,9 +6,9 @@ const supabase = createClient(
   import.meta.env.PUBLIC_SUPABASE_ANON_KEY
 );
 
-const { scientific_name, slug } = Astro.params;
-const targetName = scientific_name || slug;
-const decodedName = decodeURIComponent(targetName || '').trim();
+// Extract the slug from the URL
+const { slug } = Astro.params;
+const decodedName = decodeURIComponent(slug || '').trim();
 
 // 1. Safely fetch species by scientific name (with fallback search)
 let { data: species, error } = await supabase
@@ -30,19 +30,40 @@ if (!species) {
   return Astro.redirect('/404');
 }
 
-// 2. Safely fetch literature without crashing the page if unavailable
+// 2. Safely fetch literature from your actual database tables
 let literatureList = [];
 try {
-  const { data: litData } = await supabase
-    .from('literature')
+  // Attempt 1: Check the 'publications' table directly
+  const { data: pubData } = await supabase
+    .from('publications')
     .select('*')
-    .eq('species_id', species.id);
+    .or(`species_id.eq.${species.id},species_id.eq.${species.scientific_name}`);
   
-  if (litData) {
-    literatureList = litData;
+  if (pubData && pubData.length > 0) {
+    literatureList = pubData;
+  } else {
+    // Attempt 2: Check via the 'species_publications' junction table
+    const { data: junctionData } = await supabase
+      .from('species_publications')
+      .select('publications(*)')
+      .eq('species_id', species.id);
+    
+    if (junctionData && junctionData.length > 0) {
+      literatureList = junctionData.map((item: any) => item.publications).filter(Boolean);
+    } else {
+      // Attempt 3: Check the 'papers' table as a fallback
+      const { data: paperData } = await supabase
+        .from('papers')
+        .select('*')
+        .or(`species_id.eq.${species.id},species_id.eq.${species.scientific_name}`);
+      
+      if (paperData && paperData.length > 0) {
+        literatureList = paperData;
+      }
+    }
   }
 } catch (e) {
-  // Gracefully handle if literature table/relation varies
+  console.error("Literature fetch error:", e);
 }
 
 // Helper to style IUCN status badges dynamically
@@ -58,12 +79,16 @@ function getStatusStyle(status: string) {
 }
 
 const statusStyle = getStatusStyle(species.conservation_status);
+
+// Deduplicate names for rendering
+const displayCommonName = species.common_name || species.scientific_name;
+const showScientificName = species.scientific_name && species.scientific_name !== species.common_name;
 ---
 
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>{species.common_name} — Wildlife & Research Database</title>
+    <title>{displayCommonName} — Wildlife & Research Database</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Newsreader:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
     <style>
@@ -158,9 +183,6 @@ const statusStyle = getStatusStyle(species.conservation_status);
       }
       .status-badge {
         display: inline-block;
-        background: {statusStyle.bg};
-        color: {statusStyle.color};
-        border: 1px solid {statusStyle.border};
         font-size: 0.8rem;
         font-weight: 500;
         padding: 6px 14px;
@@ -328,14 +350,18 @@ const statusStyle = getStatusStyle(species.conservation_status);
     <div class="main-wrapper">
       
       <div class="profile-header">
-        <h1>{species.common_name}</h1>
-        <p class="sci-name">{species.scientific_name}</p>
-        <span class="status-badge">{species.conservation_status}</span>
+        <h1>{displayCommonName}</h1>
+        {showScientificName && (
+          <p class="sci-name">{species.scientific_name}</p>
+        )}
+        <span class="status-badge" style={`background: ${statusStyle.bg}; color: ${statusStyle.color}; border: 1px solid ${statusStyle.border};`}>
+          {species.conservation_status}
+        </span>
       </div>
 
       {species.image_url && (
         <div class="image-container">
-          <img src={species.image_url} alt={species.common_name} class="profile-img" />
+          <img src={species.image_url} alt={displayCommonName} class="profile-img" />
         </div>
       )}
 

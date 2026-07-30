@@ -8,28 +8,48 @@ const supabase = createClient(
 
 const url = new URL(Astro.request.url);
 const searchQuery = url.searchParams.get('q') || '';
+const statusQuery = url.searchParams.get('status') || '';
 
 let speciesList = null;
 let randomSpecies = null;
 
-if (searchQuery) {
-  const { data, error } = await supabase
-    .from('species')
-    .select('common_name, scientific_name, conservation_status, image_url, description')
-    .or(`common_name.ilike.%${searchQuery}%,scientific_name.ilike.%${searchQuery}%`)
-    .order('common_name', { ascending: true });
+// Dynamically build the Supabase query
+let query = supabase
+  .from('species')
+  .select('common_name, scientific_name, conservation_status, image_url, description');
 
+// If the user is searching OR filtering, fetch the list
+if (searchQuery || statusQuery) {
+  if (searchQuery) {
+    query = query.or(`common_name.ilike.%${searchQuery}%,scientific_name.ilike.%${searchQuery}%`);
+  }
+  if (statusQuery) {
+    query = query.ilike('conservation_status', `%${statusQuery}%`);
+  }
+  
+  const { data, error } = await query.order('common_name', { ascending: true });
+  
   if (!error) {
     speciesList = data;
   }
 } else {
-  const { data, error } = await supabase
-    .from('species')
-    .select('common_name, scientific_name, conservation_status, image_url, description');
-
+  // If no search or filter, just get a random featured discovery record
+  const { data, error } = await query;
   if (!error && data && data.length > 0) {
     const randomIndex = Math.floor(Math.random() * data.length);
     randomSpecies = data[randomIndex];
+  }
+}
+
+// Helper to style IUCN status badges dynamically
+function getStatusStyle(status: string) {
+  const s = (status || '').toLowerCase();
+  if (s.includes('critically endangered') || s.includes('endangered')) {
+    return { bg: 'rgba(127, 29, 29, 0.6)', color: '#f87171', border: 'rgba(248, 113, 113, 0.3)' };
+  } else if (s.includes('vulnerable') || s.includes('near threatened')) {
+    return { bg: 'rgba(120, 53, 15, 0.6)', color: '#fbbf24', border: 'rgba(251, 191, 36, 0.3)' };
+  } else {
+    return { bg: 'rgba(6, 78, 59, 0.6)', color: '#34d399', border: 'rgba(52, 211, 153, 0.3)' };
   }
 }
 ---
@@ -96,7 +116,7 @@ if (searchQuery) {
 
       /* Main Centered Container */
       .main-wrapper {
-        max-width: 850px;
+        max-width: 900px;
         width: 100%;
         margin: 0 auto;
         padding: 50px 20px;
@@ -129,7 +149,7 @@ if (searchQuery) {
         margin: 0 auto;
       }
 
-      /* Search Form */
+      /* Search & Filters */
       .search-form {
         width: 100%;
         max-width: 650px;
@@ -140,7 +160,7 @@ if (searchQuery) {
         border-radius: 16px;
         border: 1px solid #1e293b;
         box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.4);
-        margin-bottom: 50px;
+        margin-bottom: 20px;
       }
       .search-input {
         flex-grow: 1;
@@ -168,20 +188,40 @@ if (searchQuery) {
       .search-btn:hover {
         background-color: #047857;
       }
-      .reset-btn {
+      
+      .filter-container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        justify-content: center;
+        margin-bottom: 50px;
+      }
+      .filter-pill {
         background-color: #1e293b;
         color: #cbd5e1;
         border: 1px solid #334155;
-        padding: 12px 18px;
-        border-radius: 12px;
+        padding: 8px 18px;
+        border-radius: 20px;
+        font-size: 0.85rem;
         font-weight: 500;
-        cursor: pointer;
-        font-size: 0.9rem;
-        display: flex;
-        align-items: center;
+        transition: all 0.2s;
+      }
+      .filter-pill:hover {
+        background-color: #334155;
+        color: #fff;
+      }
+      .filter-pill.active {
+        background-color: rgba(16, 185, 129, 0.2);
+        color: #34d399;
+        border-color: rgba(52, 211, 153, 0.4);
+      }
+      .reset-btn {
+        color: #f87171;
+        border: 1px solid rgba(248, 113, 113, 0.3);
+        background: rgba(127, 29, 29, 0.2);
       }
       .reset-btn:hover {
-        background-color: #334155;
+        background: rgba(127, 29, 29, 0.4);
       }
 
       /* Content Area */
@@ -257,9 +297,6 @@ if (searchQuery) {
       }
       .status-badge {
         display: inline-block;
-        background: rgba(6, 78, 59, 0.6);
-        color: #34d399;
-        border: 1px solid rgba(52, 211, 153, 0.3);
         font-size: 0.75rem;
         font-weight: 500;
         padding: 4px 10px;
@@ -293,7 +330,7 @@ if (searchQuery) {
       /* Search Results Grid */
       .results-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
         gap: 24px;
         text-align: left;
       }
@@ -330,6 +367,7 @@ if (searchQuery) {
         text-align: center;
         color: #64748b;
         font-size: 0.8rem;
+        margin-top: 40px;
       }
       .footer-content {
         max-width: 850px;
@@ -379,6 +417,8 @@ if (searchQuery) {
       </div>
 
       <form method="GET" class="search-form">
+        <!-- Hidden input preserves the status filter if user adds a text search -->
+        {statusQuery && <input type="hidden" name="status" value={statusQuery} />}
         <input 
           type="text" 
           name="q" 
@@ -387,40 +427,56 @@ if (searchQuery) {
           class="search-input"
         />
         <button type="submit" class="search-btn">Search</button>
-        {searchQuery && (
-          <a href="/" class="reset-btn">Reset</a>
-        )}
       </form>
 
+      <div class="filter-container">
+        <a href={`/?q=${searchQuery}`} class={`filter-pill ${!statusQuery ? 'active' : ''}`}>All Species</a>
+        <a href={`/?q=${searchQuery}&status=Endangered`} class={`filter-pill ${statusQuery === 'Endangered' ? 'active' : ''}`}>Endangered</a>
+        <a href={`/?q=${searchQuery}&status=Vulnerable`} class={`filter-pill ${statusQuery === 'Vulnerable' ? 'active' : ''}`}>Vulnerable</a>
+        <a href={`/?q=${searchQuery}&status=Near Threatened`} class={`filter-pill ${statusQuery === 'Near Threatened' ? 'active' : ''}`}>Near Threatened</a>
+        <a href={`/?q=${searchQuery}&status=Least Concern`} class={`filter-pill ${statusQuery === 'Least Concern' ? 'active' : ''}`}>Least Concern</a>
+        
+        {(searchQuery || statusQuery) && (
+          <a href="/" class="filter-pill reset-btn">Clear All x</a>
+        )}
+      </div>
+
       <div class="content-container">
-        {searchQuery ? (
+        {(searchQuery || statusQuery) ? (
           <div>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 12px; border-bottom: 1px solid #1e293b;">
               <h2 style="font-size: 1.1rem; font-weight: 500; color: #cbd5e1; margin: 0;">
-                Search Results for <span style="color: #34d399; font-weight: 600;">"{searchQuery}"</span>
+                Showing results 
+                {searchQuery && <span>for <span style="color: #34d399; font-weight: 600;">"{searchQuery}"</span></span>}
+                {statusQuery && <span> in <span style="color: #34d399; font-weight: 600;">{statusQuery}</span></span>}
               </h2>
               <span style="font-size: 0.8rem; color: #64748b;">{speciesList ? speciesList.length : 0} records found</span>
             </div>
 
             {speciesList && speciesList.length > 0 ? (
               <div class="results-grid">
-                {speciesList.map((species) => (
-                  <a href={`/species/${encodeURIComponent(species.scientific_name)}`} class="result-card">
-                    {species.image_url && (
-                      <img src={species.image_url} alt={species.common_name} class="result-img" />
-                    )}
-                    <div class="result-body">
-                      <h3 style="font-family: 'Newsreader', Georgia, serif; font-size: 1.25rem; font-weight: 600; color: #fff; margin: 0 0 4px 0;">
-                        {species.common_name}
-                      </h3>
-                      <p style="font-family: 'Newsreader', Georgia, serif; font-style: italic; color: #94a3b8; font-size: 0.9rem; margin: 0 0 12px 0;">
-                        {species.scientific_name}
-                      </p>
-                      <span class="status-badge" style="margin-bottom: 12px;">{species.conservation_status}</span>
-                      <p class="card-desc" style="margin-top: auto; margin-bottom: 0;">{species.description}</p>
-                    </div>
-                  </a>
-                ))}
+                {speciesList.map((species: any) => {
+                  const sStyle = getStatusStyle(species.conservation_status);
+                  return (
+                    <a href={`/species/${encodeURIComponent(species.scientific_name)}`} class="result-card">
+                      {species.image_url && (
+                        <img src={species.image_url} alt={species.common_name} class="result-img" />
+                      )}
+                      <div class="result-body">
+                        <h3 style="font-family: 'Newsreader', Georgia, serif; font-size: 1.25rem; font-weight: 600; color: #fff; margin: 0 0 4px 0;">
+                          {species.common_name}
+                        </h3>
+                        <p style="font-family: 'Newsreader', Georgia, serif; font-style: italic; color: #94a3b8; font-size: 0.9rem; margin: 0 0 12px 0;">
+                          {species.scientific_name}
+                        </p>
+                        <span class="status-badge" style={`background: ${sStyle.bg}; color: ${sStyle.color}; border: 1px solid ${sStyle.border};`}>
+                          {species.conservation_status}
+                        </span>
+                        <p class="card-desc" style="margin-top: auto; margin-bottom: 0;">{species.description}</p>
+                      </div>
+                    </a>
+                  );
+                })}
               </div>
             ) : (
               <div style="padding: 60px 20px; background: #121a17; border: 1px solid #1e293b; border-radius: 16px;">
@@ -450,7 +506,11 @@ if (searchQuery) {
                 <div class="featured-content">
                   <h2 class="card-title">{randomSpecies.common_name}</h2>
                   <p class="card-sci-name">{randomSpecies.scientific_name}</p>
-                  <span class="status-badge">{randomSpecies.conservation_status}</span>
+                  
+                  <span class="status-badge" style={`background: ${getStatusStyle(randomSpecies.conservation_status).bg}; color: ${getStatusStyle(randomSpecies.conservation_status).color}; border: 1px solid ${getStatusStyle(randomSpecies.conservation_status).border};`}>
+                    {randomSpecies.conservation_status}
+                  </span>
+
                   <p class="card-desc">{randomSpecies.description}</p>
                   <span class="card-link">
                     Access full record &amp; papers &rarr;
